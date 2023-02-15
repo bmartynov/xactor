@@ -1,3 +1,4 @@
+use std::fmt;
 use crate::{Actor, ActorId, Caller, Context, Error, Handler, Message, Result, Sender};
 use futures::channel::{mpsc, oneshot};
 use futures::future::Shared;
@@ -25,6 +26,12 @@ pub struct Addr<A> {
     pub(crate) actor_id: ActorId,
     pub(crate) tx: Arc<mpsc::UnboundedSender<ActorEvent<A>>>,
     pub(crate) rx_exit: Option<Shared<oneshot::Receiver<()>>>,
+}
+
+impl <A> fmt::Debug for Addr<A> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Addr").finish()
+    }
 }
 
 impl<A> Clone for Addr<A> {

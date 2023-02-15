@@ -73,7 +73,7 @@ impl Supervisor {
     pub async fn start<A, F>(f: F) -> Result<Addr<A>>
     where
         A: Actor,
-        F: Fn() -> A + Send + 'static,
+        F: Fn(&mut Context<A>) -> A + Send + 'static,
     {
         let (mut ctx, mut rx, tx) = Context::new(None);
         let addr = Addr {
@@ -83,7 +83,7 @@ impl Supervisor {
         };
 
         // Create the actor
-        let mut actor = f();
+        let mut actor = f(&mut ctx);
 
         // Call started
         actor.started(&mut ctx).await?;
@@ -94,7 +94,10 @@ impl Supervisor {
                     'event_loop: loop {
                         match rx.next().await {
                             None => break 'restart_loop,
-                            Some(ActorEvent::Stop(_err)) => break 'event_loop,
+                            Some(ActorEvent::Stop(err)) => {
+                                actor.stopped(&mut ctx, err).await;
+                                break 'event_loop;
+                            },
                             Some(ActorEvent::Exec(f)) => f(&mut actor, &mut ctx).await,
                             Some(ActorEvent::RemoveStream(id)) => {
                                 let mut streams = ctx.streams.lock().unwrap();
@@ -106,14 +109,14 @@ impl Supervisor {
                         }
                     }
 
-                    actor.stopped(&mut ctx).await;
                     ctx.abort_streams();
                     ctx.abort_intervals();
 
-                    actor = f();
+                    actor = f(&mut ctx);
                     actor.started(&mut ctx).await.ok();
                 }
-                actor.stopped(&mut ctx).await;
+
+                actor.stopped(&mut ctx, None).await;
                 ctx.abort_streams();
                 ctx.abort_intervals();
             }

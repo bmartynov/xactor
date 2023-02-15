@@ -1,10 +1,11 @@
 use crate::addr::ActorEvent;
 use crate::error::Result;
 use crate::runtime::spawn;
-use crate::{Addr, Context};
+use crate::{Addr, Context, Error};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::channel::oneshot;
 use futures::{FutureExt, StreamExt};
+use futures::future::BoxFuture;
 
 /// Represents a message that can be handled by the actor.
 pub trait Message: 'static + Send {
@@ -64,7 +65,7 @@ pub trait Actor: Sized + Send + 'static {
     }
 
     /// Called after an actor is stopped.
-    async fn stopped(&mut self, ctx: &mut Context<Self>) {}
+    async fn stopped(&mut self, ctx: &mut Context<Self>, err: Option<Error>) {}
 
     /// Construct and start a new actor, returning its address.
     ///
@@ -111,6 +112,19 @@ pub trait Actor: Sized + Send + 'static {
     async fn start(self) -> Result<Addr<Self>> {
         ActorManager::new().start_actor(self).await
     }
+
+    async fn create<F>(f: F) -> Result<Addr<Self>>
+        where
+            F: Send + FnOnce(&mut Context<Self>) -> BoxFuture<Result<Self>>
+    {
+        let mut manager = ActorManager::new();
+
+        let ctx = &mut manager.ctx;
+
+        let actor = f(ctx).await?;
+
+        manager.start_actor(actor).await
+    }
 }
 
 pub(crate) struct ActorManager<A: Actor> {
@@ -125,12 +139,7 @@ impl<A: Actor> ActorManager<A> {
         let (tx_exit, rx_exit) = oneshot::channel();
         let rx_exit = rx_exit.shared();
         let (ctx, rx, tx) = Context::new(Some(rx_exit));
-        Self {
-            ctx,
-            rx,
-            tx,
-            tx_exit,
-        }
+        Self { ctx, rx, tx, tx_exit }
     }
 
     pub(crate) fn address(&self) -> Addr<A> {
@@ -156,7 +165,7 @@ impl<A: Actor> ActorManager<A> {
                 while let Some(event) = rx.next().await {
                     match event {
                         ActorEvent::Exec(f) => f(&mut actor, &mut ctx).await,
-                        ActorEvent::Stop(_err) => break,
+                        ActorEvent::Stop(err) => actor.stopped(&mut ctx, err).await,
                         ActorEvent::RemoveStream(id) => {
                             let mut streams = ctx.streams.lock().unwrap();
 
@@ -166,8 +175,6 @@ impl<A: Actor> ActorManager<A> {
                         }
                     }
                 }
-
-                actor.stopped(&mut ctx).await;
 
                 ctx.abort_streams();
                 ctx.abort_intervals();
