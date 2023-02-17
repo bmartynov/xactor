@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use crate::addr::ActorEvent;
 use crate::error::Result;
 use crate::runtime::spawn;
@@ -12,6 +13,10 @@ pub trait Message: 'static + Send {
     /// The return value type of the message
     /// This type can be set to () if the message does not return a value, or if it is a notification message
     type Result: 'static + Send;
+}
+
+impl<M: Message + Send + Sync> Message for Arc<M> {
+    type Result = M::Result;
 }
 
 /// Describes how to handle messages of a specific type.

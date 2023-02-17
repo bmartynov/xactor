@@ -1,10 +1,10 @@
 use crate::addr::ActorEvent;
 use crate::broker::{Subscribe, Unsubscribe};
 use crate::runtime::{sleep, spawn};
-use crate::{ActorId, Addr, Broker, Error, Handler, Message, Result, Service, StreamHandler};
+use crate::{Actor, ActorId, Addr, Broker, Error, Handler, Message, Result, Service, StreamHandler};
 use futures::channel::{mpsc, oneshot};
 use futures::future::{AbortHandle, Abortable, Shared};
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, Future};
 use once_cell::sync::OnceCell;
 use slab::Slab;
 use std::fmt;
@@ -321,5 +321,46 @@ impl<A> Context<A> {
         broker.send(Unsubscribe {
             actor_id: self.actor_id,
         })
+    }
+
+    pub fn resolve<F>(&mut self, f: F)
+        where
+            A: Handler<F::Output>,
+            F: Future + Send + 'static,
+            F::Output: Message<Result = ()>,
+    {
+        let address = self.address();
+        crate::spawn(async move {
+            let msg = f.await;
+
+            address.send(msg).ok();
+        });
+    }
+
+    pub fn stop_on<F>(&mut self, f: F)
+        where
+            A: Actor + Sync + Send,
+            F: Future<Output = ()> + Send + 'static,
+    {
+        let mut address = self.address();
+
+        crate::spawn(async move {
+            f.await;
+
+            address.stop(None).ok();
+        });
+    }
+    pub fn on_stop<F>(&mut self, f: F)
+        where
+            A: Actor,
+            F: Future<Output = ()> + Send + 'static,
+    {
+        let address = self.address();
+
+        crate::spawn(async move {
+            address.wait_for_stop().await;
+
+            f.await;
+        });
     }
 }

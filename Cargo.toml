@@ -13,6 +13,18 @@ keywords = ["actor", "futures", "async", "xactor", "async-std"]
 categories = ["network-programming", "asynchronous"]
 readme = "README.md"
 
+[profile.release]
+# Optimize For Size
+opt-level = "z"
+# Strip symbols from Binary
+strip = true
+# Enable Link Time Optimization
+lto = true
+# Abort on Panic
+panic = "abort"
+# Reduce Parallel Code Generation Units to Increase Optimization
+codegen-units = 1
+
 [dependencies]
 futures = "0.3.21"
 async-trait = "0.1.52"
